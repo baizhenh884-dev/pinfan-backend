@@ -1,11 +1,16 @@
 package com.pinfan.service.impl;
 
+import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.RandomUtil;
+import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.pinfan.common.exception.BusinessException;
+import com.pinfan.dto.UpdateMeDTO;
+import com.pinfan.dto.UserVO;
 import com.pinfan.entity.User;
 import com.pinfan.mapper.UserMapper;
 import com.pinfan.service.UserService;
+import com.pinfan.utils.UserHolder;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -65,5 +70,48 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         stringRedisTemplate.delete(key);
 
         return token;
+    }
+
+    @Override
+    public UserVO getMe() {
+        User user = UserHolder.getUser();
+        UserVO userVO = new UserVO();
+        BeanUtil.copyProperties(user, userVO);
+        return userVO;
+    }
+
+    @Override
+    public UserVO updateMe(UpdateMeDTO dto, String token) {
+
+        User current = UserHolder.getUser();
+
+        User update = new User();
+        update.setId(current.getId());
+        if (StrUtil.isNotBlank(dto.getNickname())) {
+            update.setNickname(dto.getNickname());
+        }
+        if (StrUtil.isNotBlank(dto.getAvatar())) {
+            update.setAvatar(dto.getAvatar());
+        }
+        updateById(update);
+
+        // 重新查完整数据
+        User fresh = getById(current.getId());
+
+        // Redis
+        String key = "cache:token:" + token;
+        redisTemplate.opsForValue().set(key, fresh, 30, TimeUnit.MINUTES);
+
+        UserHolder.saveUser(fresh);
+
+        UserVO vo = new UserVO();
+        BeanUtil.copyProperties(fresh, vo);
+        return vo;
+    }
+
+    @Override
+    public void logout(String token) {
+        String key = "cache:token:" + token;
+        redisTemplate.delete(key);
     }
 }

@@ -1,5 +1,6 @@
 package com.pinfan.interceptor;
 
+import com.pinfan.utils.UserHolder;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
@@ -12,7 +13,11 @@ import javax.servlet.http.HttpServletResponse;
 public class LoginInterceptor implements HandlerInterceptor {
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
-        log.info("拦截器：{} {}", request.getMethod(), request.getRequestURI());
+        if (UserHolder.getUser() == null) {
+            response.setStatus(401);
+            return false;
+        }
+
         return true;
     }
 }
