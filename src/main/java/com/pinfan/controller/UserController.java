@@ -8,6 +8,7 @@ import com.pinfan.dto.UpdateMeDTO;
 import com.pinfan.dto.UserVO;
 import com.pinfan.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
@@ -16,6 +17,7 @@ import javax.validation.Valid;
 
 @RestController
 @RequestMapping("/user")
+@Tag(name = "01-用户接口", description = "登录、当前用户、登出")
 public class UserController {
 
     @Autowired
