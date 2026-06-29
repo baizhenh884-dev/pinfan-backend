@@ -43,10 +43,21 @@ public class ShopController {
     }
 
     @GetMapping("/{id}")
-    @Operation(summary = "商家详情")
+    @Operation(summary = "商家详情（逻辑过期方案）")
     public R<Shop> detail(@PathVariable Long id) {
-        Shop shop = shopService.queryById(id);
+        Shop shop = shopService.queryByIdWithLogicalExpire(id);
+        if (shop == null) {
+            throw new BusinessException(404, "商家未预热或不存在");
+        }
         return R.ok(shop);
+    }
+
+    @PostMapping("/{id}/warm-up")
+    @Operation(summary = "预热商家到逻辑过期缓存（测试用）")
+    public R<Void> warmUp(@PathVariable Long id,
+                          @RequestParam(defaultValue = "1800") Long expireSeconds) {
+        shopService.saveShop2Redis(id, expireSeconds);
+        return R.ok("预热完成", null);
     }
 
     @GetMapping("/page")
