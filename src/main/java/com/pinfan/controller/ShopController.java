@@ -38,17 +38,14 @@ public class ShopController {
     public R<Void> updateShop(@RequestBody @Valid ShopUpdateDTO shopUpdateDTO) {
         Shop shop = new Shop();
         BeanUtil.copyProperties(shopUpdateDTO, shop);
-        shopService.updateById(shop);   // MyBatis-Plus：null 字段不会被改
+        shopService.updateShop(shop);   // MyBatis-Plus：null 字段不会被改
         return R.ok("已更新", null);
     }
 
     @GetMapping("/{id}")
     @Operation(summary = "商家详情")
     public R<Shop> detail(@PathVariable Long id) {
-        Shop shop = shopService.getById(id);
-        if (shop == null) {
-            throw new BusinessException(404, "商家不存在");
-        }
+        Shop shop = shopService.queryById(id);
         return R.ok(shop);
     }
 
