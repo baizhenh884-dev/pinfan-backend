@@ -4,6 +4,8 @@ import cn.hutool.core.bean.BeanUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.pinfan.common.exception.BusinessException;
 import com.pinfan.common.result.R;
+import com.pinfan.dto.LocationDTO;
+import com.pinfan.dto.NearbyShopVO;
 import com.pinfan.dto.ShopCreateDTO;
 import com.pinfan.dto.ShopUpdateDTO;
 import com.pinfan.entity.Shop;
@@ -15,6 +17,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 import javax.validation.Valid;
+import java.math.BigDecimal;
+import java.util.List;
 
 @RestController
 @RequestMapping("/shop")
@@ -70,5 +74,29 @@ public class ShopController {
                 .orderByDesc(Shop::getScore)                              // 评分降序
                 .page(new Page<>(current, size));
         return R.ok(page);
+    }
+
+    @PostMapping("/admin/migrate-geo")
+    @Operation(summary = "【管理员】把所有商家位置同步到 Redis GEO")
+    public R<Void> migrateGeo() {
+        shopService.migrateAllShopsToGeo();
+        return R.ok("迁移完成", null);
+    }
+
+    @PostMapping("/{id}/location")
+    @Operation(summary = "录入/更新商家位置（同步 DB + Redis GEO）")
+    public R<Void> updateLocation(@PathVariable Long id,
+                                  @RequestBody @Valid LocationDTO dto) {
+        shopService.updateLocation(id, dto.getX(), dto.getY());
+        return R.ok("位置已更新", null);
+    }
+
+    @GetMapping("/nearby")
+    @Operation(summary = "查附近商家")
+    public R<List<NearbyShopVO>> nearby(
+            @RequestParam BigDecimal lng,
+            @RequestParam BigDecimal lat,
+            @RequestParam(defaultValue = "1.0") Double distance) {
+        return R.ok(shopService.queryNearby(lng, lat, distance));
     }
 }

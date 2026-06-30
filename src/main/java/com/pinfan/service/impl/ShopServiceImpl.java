@@ -1,24 +1,39 @@
 package com.pinfan.service.impl;
 
+import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.pinfan.common.exception.BusinessException;
+import com.pinfan.dto.NearbyShopVO;
 import com.pinfan.entity.Shop;
 import com.pinfan.mapper.ShopMapper;
 import com.pinfan.service.ShopService;
 import com.pinfan.utils.RedisData;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.geo.Distance;
+import org.springframework.data.geo.GeoResult;
+import org.springframework.data.geo.GeoResults;
+import org.springframework.data.geo.Point;
+import org.springframework.data.redis.connection.RedisGeoCommands;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.domain.geo.GeoReference;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -61,7 +76,7 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop>
         log.info("缓存未命中，查 DB: {}", key);
         Shop shop = getById(id);
         if (shop == null) {
-            // ⚠️ 穿透防御：DB 查不到，写空值缓存，TTL 短（2分钟基础 + 0~30秒随机抖动）
+            // 穿透防御：DB 查不到，写空值缓存，TTL 短（2分钟基础 + 0~30秒随机抖动）
             stringRedisTemplate.opsForValue().set(key, "", randomTtl(120, 30), TimeUnit.SECONDS);
             throw new BusinessException(404, "商家不存在");
         }
@@ -74,15 +89,19 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop>
 
     @Override
     public void updateShop(Shop shop) {
-        if (shop.getId() == null) {
-            throw new BusinessException(400, "id不能为空");
-        }
-        // 先更新数据库
+        if (shop.getId() == null) throw new BusinessException(400, "id不能为空");
+
         updateById(shop);
-        // 再删除缓存
-        String key = "cache:shop:" + shop.getId();
-        stringRedisTemplate.delete(key);
-        log.info("更新商家并删除缓存: {}", key);
+        stringRedisTemplate.delete("cache:shop:" + shop.getId());
+
+        // 如果本次更新带了坐标,顺便同步 GEO
+        if (shop.getX() != null && shop.getY() != null) {
+            stringRedisTemplate.opsForGeo().add(
+                    "geo:shop",
+                    new Point(shop.getX().doubleValue(), shop.getY().doubleValue()),
+                    shop.getId().toString()
+            );
+        }
     }
 
     private boolean tryLock(String key) {
@@ -166,11 +185,11 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop>
         if (shop == null) {
             throw new BusinessException(404, "商家不存在");
         }
-        // 包装：业务数据 + 逻辑过期时间（雪崩防御：加 0~5分钟随机抖动）
+        // 包装：业务数据 + 逻辑过期时间
         RedisData redisData = new RedisData();
         redisData.setData(shop);
         redisData.setExpireTime(LocalDateTime.now().plusSeconds(randomTtl(expireSeconds, 300)));
-        // ⚠️ 注意：set 不带 TTL —— Redis 物理永不过期
+        // 注意：set 不带 TTL —— Redis 物理永不过期
         stringRedisTemplate.opsForValue().set("cache:shop:" + id, JSONUtil.toJsonStr(redisData));
         log.info("预热缓存: cache:shop:{}, 过期时间: {}", id, redisData.getExpireTime());
     }
@@ -213,7 +232,86 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop>
             });
         }
 
-        // 5. ⚠️ 无论是否抢到锁，立刻返回旧数据（不阻塞用户）
+        // 5. 无论是否抢到锁，立刻返回旧数据（不阻塞用户）
         return shop;
+    }
+
+    @Override
+    public void migrateAllShopsToGeo() {
+        // 查所有有坐标的商家
+        List<Shop> shops = lambdaQuery()
+                .isNotNull(Shop::getX)
+                .isNotNull(Shop::getY)
+                .list();
+
+        String key = "geo:shop";
+        int count = 0;
+        for (Shop shop : shops) {
+            stringRedisTemplate.opsForGeo().add(
+                    key,
+                    new Point(shop.getX().doubleValue(), shop.getY().doubleValue()),
+                    shop.getId().toString()
+            );
+            count++;
+        }
+        log.info("GEO 数据迁移完成，写入 {} 个商家", count);
+    }
+
+    public void updateLocation(Long id, BigDecimal x, BigDecimal y) {
+        if (getById(id) == null) {
+            throw new BusinessException(404, "商家不存在");
+        }
+        Shop update = new Shop();
+        update.setId(id);
+        update.setX(x);
+        update.setY(y);
+        updateShop(update);
+    }
+
+    @Override
+    public List<NearbyShopVO> queryNearby(BigDecimal lng, BigDecimal lat, Double distance) {
+        // Redis GEOSEARCH
+        GeoResults<RedisGeoCommands.GeoLocation<String>> results = stringRedisTemplate
+                .opsForGeo()
+                .search(
+                        "geo:shop",
+                        GeoReference.fromCoordinate(lng.doubleValue(), lat.doubleValue()),
+                        new Distance(distance, RedisGeoCommands.DistanceUnit.KILOMETERS),
+                        RedisGeoCommands.GeoSearchCommandArgs.newGeoSearchArgs()
+                                .includeDistance()    // 要距离信息
+                                .sortAscending()
+                );
+
+        if (results == null || results.getContent().isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        // 提取 shopId 列表 和 shopId->距离Map
+        List<Long> shopIds = new ArrayList<>();
+        Map<Long, Double> distanceMap = new HashMap<>();
+        for (GeoResult<RedisGeoCommands.GeoLocation<String>> result : results.getContent()) {
+            Long shopId = Long.valueOf(result.getContent().getName());
+            shopIds.add(shopId);
+            distanceMap.put(shopId, result.getDistance().getValue());
+        }
+
+        // 批量查 DB
+        List<Shop> shops = listByIds(shopIds);
+        Map<Long, Shop> shopMap = shops.stream()
+                .collect(Collectors.toMap(Shop::getId, s -> s));
+
+        // 组装 VO
+        List<NearbyShopVO> vos = new ArrayList<>();
+        for (Long id : shopIds) {
+            Shop shop = shopMap.get(id);
+            if (shop == null) continue;   // DB 里可能已逻辑删但 GEO 还有，跳过
+            NearbyShopVO vo = new NearbyShopVO();
+            BeanUtil.copyProperties(shop, vo);
+            vo.setDistance(distanceMap.get(id));
+            vos.add(vo);
+        }
+
+        log.info("附近商家查询: ({}, {}) 半径 {}km，返回 {} 家", lng, lat, distance, vos.size());
+        return vos;
     }
 }
