@@ -18,5 +18,3 @@ CREATE TABLE shop (
     KEY idx_category_id (category_id),
     KEY idx_name (name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='商家表';
-
-DESC shop;
