@@ -10,6 +10,7 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDateTime;
@@ -31,6 +32,9 @@ public class TestController {
 
     @Autowired
     private RedisTemplate<String, Object> redisTemplate;
+
+    @Autowired
+    private com.pinfan.service.AiService aiService;
 
     @GetMapping("/ping")
     @Operation(summary = "服务存活检查")
@@ -73,5 +77,12 @@ public class TestController {
     public R<String> testSystemError() {
         String s = null;
         return R.ok(String.valueOf(s.length())); // 必然空指针
+    }
+
+    @GetMapping("/ai")
+    @Operation(summary = "【调试】给 AI 发一句话看它怎么回")
+    public R<String> testAi(@RequestParam String q) {
+        String answer = aiService.chat(q);
+        return R.ok("AI 响应", answer);
     }
 }
