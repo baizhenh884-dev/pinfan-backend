@@ -52,6 +52,12 @@
             <artifactId>spring-boot-starter-data-redis</artifactId>
         </dependency>
 
+        <!-- Spring AOP：支持 @Aspect、@Pointcut、事务/代理增强等 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-aop</artifactId>
+        </dependency>
+
         <!-- Lombok：编译时生成 getter/setter/log -->
         <dependency>
             <groupId>org.projectlombok</groupId>
